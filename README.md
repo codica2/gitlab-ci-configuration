@@ -21,17 +21,24 @@ The .gitlab-ci.yml file is where you configure what CI does with your project. I
 On any push to your repository, GitLab will look for the .gitlab-ci.yml file and start jobs on Runners according to the contents of the file, for that commit.
 
 ```yaml
+#docker build for ci running
 image: gitlab.codica.com:1234/project/project-image:build-1.4
 
+#steps to execute our CI
 stages:
   - linters
+  #for running code quality tools (rubocop, slim-lint)
   - tests
+  #for running rspec
   - danger-bot
+  #for checking conventions surrounding code review
 
+#define what docker containers should be linked with your base image
 services:
   - postgres:latest
   - redis:latest
 
+# when developing software depends on other libraries which are fetched via the internet during build time it’s shared between pipelines and jobs
 cache:
   key: ${CI_COMMIT_REF_SLUG}
   paths:
@@ -48,6 +55,7 @@ variables:
   DANGER_GITLAB_API_BASE_URL: https://gitlab.codica.com/api/v4
   RAILS_ENV: test
 
+#command that should be run before all jobs, including deploy jobs, but after the restoration of artifacts. This can be an array or a multi-line string
 before_script:
   - bundle check || bundle install --jobs $(nproc)
 
@@ -86,16 +94,7 @@ danger:
   script:
   - bundle exec danger
 ```
-* `image` is our docker build for ci running
-* `stages` steps to execute our CI
-  * linters - for running code quality tools (rubocop, slim-lint)
-  * tests - for running rspec
-  * danger-bot - for checking conventions surrounding code review
-* `services` - define what docker containers should be linked with your base image
-* `cache` - when developing software depends on other libraries which are fetched via the internet during build time it’s shared between pipelines and jobs
-* `before_script` - is used to define the command that should be run before all jobs, including deploy jobs, but after the restoration of artifacts. This can be an array or a multi-line string.
-* `rubocop, scss-lint, rspec, danger` - jobs to be executed during ci
- 
+
 ### Push .gitlab-ci.yml to GitLab
 
 Once you’ve created .gitlab-ci.yml, you should add it to your Git repository and push it to GitLab.
