@@ -220,7 +220,7 @@ Regular pipeline graphs show the names of the jobs of each stage. Regular pipeli
 
 After configuring the Runner successfully, you should see the status of your last commit change from pending to either running, success or failed.
 
-![status](job-status.png)
+![status](job-status1.png)
 
 By clicking on a job’s status, you will be able to see the log of that job. This is important to diagnose why a job failed or acted differently than you expected.
 
