@@ -214,7 +214,7 @@ Find more information about different [Runners](https://docs.gitlab.com/ee/ci/ru
 
 ## Regular pipeline graphs
 Regular pipeline graphs show the names of the jobs of each stage. Regular pipeline graphs can be found when you are on a single pipeline page. For example:
-![pipline](gitlab-ci.png)
+![pipline](gitlab-ci1)
 
 ## Status of your pipeline and jobs
 
