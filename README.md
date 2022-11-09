@@ -233,7 +233,7 @@ Visit the [examples README](https://docs.gitlab.com/ee/ci/examples/README.html) 
 
 
 ## License
-Copyright © 2015-2019 Codica. It is released under the [MIT License](https://opensource.org/licenses/MIT).
+Copyright © 2015-2022 Codica. It is released under the [MIT License](https://opensource.org/licenses/MIT).
 
 ## About Codica
 
