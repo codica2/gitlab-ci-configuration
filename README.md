@@ -191,7 +191,7 @@ Build:
        --build-arg RAILS_MASTER_KEY=${RAILS_MASTER_KEY}
        --context "${CI_PROJECT_DIR}"
        --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
-
+```
 
 
 ### Push .gitlab-ci.yml to GitLab
