@@ -26,12 +26,16 @@ image: gitlab.codica.com:1234/project/project-image:build-1.4
 
 #steps to execute our CI
 stages:
+  - build 
+  # for running build 
   - linters
   #for running code quality tools (rubocop, slim-lint)
   - tests
   #for running rspec
-  - danger-bot
-  #for checking conventions surrounding code review
+  - scanners 
+  # for scan our app adn images on vulnerabilities
+  - deploy
+  #for deploy your app to areas (staging, production)
 
 #define what docker containers should be linked with your base image
 services:
@@ -39,61 +43,156 @@ services:
   - redis:latest
 
 # when developing software depends on other libraries which are fetched via the internet during build time it’s shared between pipelines and jobs
-cache:
-  key: ${CI_COMMIT_REF_SLUG}
-  paths:
-  - vendor/bundle
-  - node_modules/
 
 variables:
   POSTGRES_DB: test
   POSTGRES_USER: postgres
   POSTGRES_PASSWORD: ""
   POSTGRES_HOST: postgres
-  DANGER_GITLAB_API_TOKEN: YOUR_DANGER_GITLAB_API_TOKEN
-  DANGER_GITLAB_HOST: gitlab.codica.com
   DANGER_GITLAB_API_BASE_URL: https://gitlab.codica.com/api/v4
   RAILS_ENV: test
 
-#command that should be run before all jobs, including deploy jobs, but after the restoration of artifacts. This can be an array or a multi-line string
-before_script:
-  - bundle check || bundle install --jobs $(nproc)
+# Use for do this action after espessial job which use (<<: *registry_auth)
+.registry_auth: &registry_auth
+  image: public.ecr.aws/o0j8c5i3/codica:registry-auth-leaks
+  before_script:
+    - aws ecr get-login-password --region $AWS_REGION | docker login -u AWS --password-stdin $AWS_REGISTRY_URL
 
+
+# We use Rubocop for scann and format our code
 rubocop:
   stage: linters
+  needs: [Build]
+  image: $REGISTRY_IMAGE_ID
+  except:
+    - master
   script:
-  - bundle exec rubocop
+    - bundle exec rubocop
 
-slim-lint:
+# We use for scna our projects on vulnerabilities
+brakeman:
   stage: linters
+  needs: [Build]
+  image: $REGISTRY_IMAGE_ID
+  except:
+    - master
   script:
-  - slim-lint app/views/
+    - brakeman
+  
+  bundle_audit:
+  stage: linters
+  needs: [Build]
+  image: $REGISTRY_IMAGE_ID
+  except:
+    - master
+  script:
+    - bundle exec bundle-audit
 
-scss-lint:
- stage: linters
- script:
- - bundle exec scss-lint
+# Trivy we use for security scan our docker images 
+Trivy:
+  stage: linters
+  allow_failure: true
+  image:
+    name: aquasec/trivy:0.31.3
+    entrypoint: [""]
+  needs: [Build]
+  except:
+    - main
+  script:
+    - trivy image --security-checks vuln $REGISTRY_IMAGE_ID
 
+# We use GitLeaks for detect maybe some leaks and secrets in our repos(espessialy AWS keys)
+Gitleaks:
+  <<: *registry_auth
+  stage: linters
+  allow_failure: true
+  needs: []
+  except:
+    - main
+    - master
+  script:
+    - gitleaks detect --verbose --no-git | jq -r '["Description:", .Description], ["File:", .File], ["Line:", .StartLine, "Column:", .StartColumn, "--------------"]' | tr -d '[],""'
+
+# We use Hadolint for check our Dockerfiles on good syntaxis  
+Hadolint:
+  needs: []
+  image: hadolint/hadolint:latest-debian
+  stage: scanners
+  allow_failure: false
+  script:
+    - hadolint Dockerfile
+    - hadolint Dockerfile.dev
+  rules: 
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - changes: 
+        - Dockerfile*
+
+# We use Yamllint for check our *.yaml files syntaxis
+Yamllint:
+  needs: []
+  image:
+    name: public.ecr.aws/**/codica:yamllint
+    entrypoint: [""]
+  stage: scanners
+  allow_failure: false
+  script:
+    - rm -rf spec
+    - yamllint .
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      when: never
+    - changes:
+        - "**/*.yml"
+        - "**/*.yaml"
+
+
+# Use rspec for test our application
 rspec:
   stage: tests
+  image: $REGISTRY_IMAGE
+  needs: [Build | Staging]
+  variables:
+    DB_HOST: postgres
+    DB_USERNAME: postgres
+    DB_PASSWORD: ""
+    DB_PORT: 5432
+    POSTGRES_DB: api_test
+    POSTGRES_USER: postgres
+    POSTGRES_PASSWORD: ""
+    POSTGRES_HOST: postgres
+    RAILS_ENV: test
+    REDIS_URL: "redis://redis:6379"
+  services:
+    - postgres:10.11
+    - redis:6.2.1-alpine
   script:
-  - cp bin/ci/.env.ci .env
-  - cp bin/ci/database.gitlab-ci.yml config/database.yml
-  - bundle exec rake parallel:create parallel:load_schema
-  - bundle exec rake parallel:spec
-  artifacts:
-    when: always
-    paths:
-      - tmp/capybara/
-      - coverage/
-      - log/
-    expire_in: 3 hours
+    - bundle exec rails db:migrate RAILS_ENV=test
+    - bundle exec rspec
+  except:
+    - main
+    - master
 
-danger:
-  stage: danger-bot
+### Build Application before tests
+# We Use Kaniko for build our apps(and don't use some keys in our gitlab-runner which depends on security)
+
+Build:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  except: 
+    - master
+  before_script: 
+    - mkdir -p /kaniko/.docker
+    - echo "{\"credHelpers\":{\"$AWS_REGISTRY_URL\":\"ecr-login\"}}" > /kaniko/.docker/config.json
   script:
-  - bundle exec danger
-```
+    - /kaniko/executor --destination "${REGISTRY_IMAGE}"  
+       --build-arg RAILS_MASTER_KEY=${RAILS_MASTER_KEY}
+       --context "${CI_PROJECT_DIR}"
+       --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+
+
 
 ### Push .gitlab-ci.yml to GitLab
 
