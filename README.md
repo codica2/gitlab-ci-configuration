@@ -21,36 +21,33 @@ The .gitlab-ci.yml file is where you configure what CI does with your project. I
 On any push to your repository, GitLab will look for the .gitlab-ci.yml file and start jobs on Runners according to the contents of the file, for that commit.
 
 ```yaml
-#docker build for ci running
-image: gitlab.codica.com:1234/project/project-image:build-1.4
 
 #steps to execute our CI
 stages:
   - build 
   # for running build 
   - linters
-  #for running code quality tools (rubocop, slim-lint)
+  # for running code quality tools (rubocop, slim-lint)
   - tests
   #for running rspec
   - scanners 
-  # for scan our app adn images on vulnerabilities
+  # for scan our app and images on vulnerabilities
   - deploy
-  #for deploy your app to areas (staging, production)
+  # for deploy your app to areas (staging, production)
 
-#define what docker containers should be linked with your base image
-services:
-  - postgres:latest
-  - redis:latest
-
-# when developing software depends on other libraries which are fetched via the internet during build time it’s shared between pipelines and jobs
-
+# All variables you will set up in your repo (Settings->CI/CD->Variables)
 variables:
-  POSTGRES_DB: test
-  POSTGRES_USER: postgres
-  POSTGRES_PASSWORD: ""
-  POSTGRES_HOST: postgres
-  DANGER_GITLAB_API_BASE_URL: https://gitlab.codica.com/api/v4
-  RAILS_ENV: test
+  AWS_REGION: $AWS_REGION
+  POSTGRES_DB: $POSTGRES_DB
+  POSTGRES_USER: $POSTGRES_USER
+  POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+  POSTGRES_HOST: $POSTGRES_HOST
+  RAILS_ENV: $RAILS_ENV
+  REGISTRY_IMAGE_ID: $REGISTRY_IMAGE_ID
+  AWS_REGISTRY_URL: $AWS_REGISTRY_UR
+  GITLEAKS_CONFIG: gitleaks.toml
+  ECS_CLUSTER_STAGING: $ECS_CLUSTER_STAGING
+
 
 # Use for do this action after espessial job which use (<<: *registry_auth)
 .registry_auth: &registry_auth
@@ -155,22 +152,13 @@ rspec:
   variables:
     DB_HOST: postgres
     DB_USERNAME: postgres
-    DB_PASSWORD: ""
+    DB_PASSWORD: $DB_PASSWORD
     DB_PORT: 5432
-    POSTGRES_DB: api_test
-    POSTGRES_USER: postgres
-    POSTGRES_PASSWORD: ""
-    POSTGRES_HOST: postgres
-    RAILS_ENV: test
     REDIS_URL: "redis://redis:6379"
-  services:
-    - postgres:10.11
-    - redis:6.2.1-alpine
   script:
     - bundle exec rails db:migrate RAILS_ENV=test
     - bundle exec rspec
   except:
-    - main
     - master
 
 # Build Application before tests
@@ -187,10 +175,30 @@ Build:
     - mkdir -p /kaniko/.docker
     - echo "{\"credHelpers\":{\"$AWS_REGISTRY_URL\":\"ecr-login\"}}" > /kaniko/.docker/config.json
   script:
-    - /kaniko/executor --destination "${REGISTRY_IMAGE}"  
-       --build-arg RAILS_MASTER_KEY=${RAILS_MASTER_KEY}
+    - /kaniko/executor --destination "${REGISTRY_IMAGE_ID}"  
+       --build-arg RAILS_MASTER_KEY=${RAILS_MASTER_KEY}  # if we need to use RAILS_MASTER_KEY for build our app
        --context "${CI_PROJECT_DIR}"
        --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
+
+# Deploy our app to our staging or produciton area
+Deploy:
+  stage: deploy
+  variables:
+    ASG_NAME: $ASG_STAGE
+    CLUSTER_NAME: $ECS_CLUSTER_STAGING
+    SERVICE_NAME: $SERVICE_STAGING
+    AWS_REGION: $AWS_REGION
+    REGISTRY_IMAGE: $REGISTRY_IMAGE_ID
+  only:
+    - develop
+  <<: *registry_auth
+  script:
+    - curl https://s3.eu-central-1.amazonaws.com/config.ssh/deploymentv2.sh | sh
+    # We use sentry for push our release to our sentry account
+    - VERSION=$(sentry-cli releases propose-version) && sentry-cli releases -o $SENTRY_ORG new -p $SENTRY_PROJECT $VERSION
+    - sentry-cli releases -o $SENTRY_ORG -p $SENTRY_PROJECT --auth-token $SENTRY_AUTH_TOKEN set-commits --auto $VERSION
+  environment:
+    name: Staging
 ```
 
 
