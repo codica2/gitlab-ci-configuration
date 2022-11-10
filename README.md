@@ -22,14 +22,14 @@ On any push to your repository, GitLab will look for the .gitlab-ci.yml file and
 
 ```yaml
 
-#steps to execute our CI
+# steps to execute our CI
 stages:
   - build 
   # for running build 
   - linters
   # for running code quality tools (rubocop, slim-lint)
   - tests
-  #for running rspec
+  # for running rspec
   - scanners 
   # for scan our app and images on vulnerabilities
   - deploy
@@ -37,16 +37,20 @@ stages:
 
 # All variables you will set up in your repo (Settings->CI/CD->Variables)
 variables:
+  RAILS_MASTER_KEY: $RAILS_MASTER_KEY
+  AWS_REGISTRY_URL: $AWS_REGISTRY_URL
   AWS_REGION: $AWS_REGION
-  POSTGRES_DB: $POSTGRES_DB
-  POSTGRES_USER: $POSTGRES_USER
-  POSTGRES_PASSWORD: $POSTGRES_PASSWORD
-  POSTGRES_HOST: $POSTGRES_HOST
-  RAILS_ENV: $RAILS_ENV
-  REGISTRY_IMAGE_ID: $REGISTRY_IMAGE_ID
-  AWS_REGISTRY_URL: $AWS_REGISTRY_UR
-  GITLEAKS_CONFIG: gitleaks.toml
+  REGISTRY_IMAGE: $AWS_REGISTRY_URL:$CI_COMMIT_REF_SLUG
+  REGISTRY_IMAGE_PRODUCTION: $AWS_REGISTRY_URL_PRODUCTION:$CI_COMMIT_REF_SLUG
   ECS_CLUSTER_STAGING: $ECS_CLUSTER_STAGING
+  ECS_CLUSTER_PRODUCTION: $ECS_CLUSTER_PRODUCTION
+  ECS_SERVICE_STAGING: $ECS_SERVICE_STAGING
+  GITLEAKS_CONFIG: gitleaks.toml
+  DOCKER_DRIVER: overlay2
+  SENTRY_AUTH_TOKEN: $SENTRY_AUTH_TOKEN
+  SENTRY_ORG: $SENTRY_ORG
+  SENTRY_PROJECT: $SENTRY_PROJECT
+
 
 
 # Use for do this action after espessial job which use (<<: *registry_auth)
@@ -175,7 +179,7 @@ Build:
     - mkdir -p /kaniko/.docker
     - echo "{\"credHelpers\":{\"$AWS_REGISTRY_URL\":\"ecr-login\"}}" > /kaniko/.docker/config.json
   script:
-    - /kaniko/executor --destination "${REGISTRY_IMAGE_ID}"  
+    - /kaniko/executor --destination "${REGISTRY_IMAGE}"  
        --build-arg RAILS_MASTER_KEY=${RAILS_MASTER_KEY}  # if we need to use RAILS_MASTER_KEY for build our app
        --context "${CI_PROJECT_DIR}"
        --dockerfile "${CI_PROJECT_DIR}/Dockerfile"
@@ -193,7 +197,7 @@ Deploy:
     - develop
   <<: *registry_auth
   script:
-    - curl https://s3.eu-central-1.amazonaws.com/config.ssh/deploymentv2.sh | sh
+    - aws ecs update-service --cluster $ECS_CLUSTER_STAGING --service $ECS_SERVICE_STAGING --force-new-deployment
     # We use sentry for push our release to our sentry account
     - VERSION=$(sentry-cli releases propose-version) && sentry-cli releases -o $SENTRY_ORG new -p $SENTRY_PROJECT $VERSION
     - sentry-cli releases -o $SENTRY_ORG -p $SENTRY_PROJECT --auth-token $SENTRY_AUTH_TOKEN set-commits --auto $VERSION
